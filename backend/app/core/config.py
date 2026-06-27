@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ffprobe_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     ffmpeg_binary: str = "ffmpeg"
     ffmpeg_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    scene_threshold: float = Field(default=0.3, gt=0, lt=1)
+    minimum_scene_duration_seconds: float = Field(default=0.5, gt=0)
+    scene_detection_timeout_seconds: float = Field(default=120.0, gt=0, le=1800)
 
     @property
     def cors_origin_list(self) -> list[str]:
