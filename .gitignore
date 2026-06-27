@@ -31,6 +31,8 @@ frames/*
 !frames/.gitkeep
 temp/*
 !temp/.gitkeep
+thumbnails/*
+!thumbnails/.gitkeep
 
 # OS and editors
 .DS_Store

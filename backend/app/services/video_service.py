@@ -38,6 +38,8 @@ class VideoMetadata:
     fps: float
     video_codec: str
     audio_codec: str | None
+    bitrate: int
+    rotation: int | None
     file_size_bytes: int
 
 
@@ -59,7 +61,7 @@ class VideoService:
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration",
+            "format=duration,bit_rate:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate:stream_tags=rotate:stream_side_data=rotation",
             "-of",
             "json",
             str(path),
@@ -166,6 +168,14 @@ class VideoService:
         except OSError as error:
             raise VideoProcessingError("The stored video size could not be read.") from error
 
+        bitrate = _positive_int(format_data.get("bit_rate"))
+        if bitrate is None:
+            bitrate = _positive_int(video_stream.get("bit_rate"))
+        if bitrate is None:
+            bitrate = max(1, round(file_size * 8 / duration))
+
+        rotation = _rotation(video_stream)
+
         return VideoMetadata(
             duration_seconds=duration,
             width=width,
@@ -173,6 +183,8 @@ class VideoService:
             fps=fps,
             video_codec=str(video_codec),
             audio_codec=audio_codec,
+            bitrate=bitrate,
+            rotation=rotation,
             file_size_bytes=file_size,
         )
 
@@ -199,6 +211,29 @@ def _frame_rate(value: object) -> float | None:
     except (TypeError, ValueError, ZeroDivisionError):
         return None
     return result if math.isfinite(result) and result > 0 else None
+
+
+def _rotation(video_stream: dict[str, Any]) -> int | None:
+    side_data = video_stream.get("side_data_list")
+    if isinstance(side_data, list):
+        for item in side_data:
+            if isinstance(item, dict) and item.get("rotation") is not None:
+                rotation = _integer(item["rotation"])
+                if rotation is not None:
+                    return rotation
+
+    tags = video_stream.get("tags")
+    if isinstance(tags, dict) and tags.get("rotate") is not None:
+        return _integer(tags["rotate"])
+    return None
+
+
+def _integer(value: object) -> int | None:
+    try:
+        result = float(str(value))
+    except (TypeError, ValueError):
+        return None
+    return round(result) if math.isfinite(result) else None
 
 
 async def _terminate_process(process: asyncio.subprocess.Process) -> None:

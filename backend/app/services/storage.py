@@ -7,7 +7,7 @@ from uuid import uuid4
 import aiofiles
 from fastapi import UploadFile
 
-ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".avi"})
+ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".avi", ".webm"})
 CHUNK_SIZE_BYTES = 1024 * 1024
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,10 @@ class InvalidFileTypeError(ValueError):
 
 class FileTooLargeError(ValueError):
     """Raised when an upload exceeds the configured size limit."""
+
+
+class EmptyFileError(ValueError):
+    """Raised when an uploaded file has no content."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,8 @@ async def store_upload(
                         f"File exceeds the {max_size_bytes // (1024 * 1024)} MB upload limit."
                     )
                 await output.write(chunk)
+            if total_bytes == 0:
+                raise EmptyFileError("The uploaded file is empty.")
     except Exception:
         output_path.unlink(missing_ok=True)
         logger.exception("Upload storage failed for %s", storage_name)

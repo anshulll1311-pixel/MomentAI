@@ -1,6 +1,6 @@
 # MomentAI
 
-MomentAI is a production-oriented AI SaaS foundation. The current **Milestone 2** backend accepts video uploads and extracts technical metadata through FFmpeg's `ffprobe`. It intentionally contains no AI analysis, transcription, frame extraction, or authentication features.
+MomentAI is a production-oriented AI SaaS foundation. The current **Milestone 3** backend analyzes uploaded videos through FFprobe and FFmpeg, extracts technical metadata, and generates a middle-frame thumbnail. It intentionally contains no AI analysis, transcription, scene detection, or authentication features.
 
 ## Stack
 
@@ -23,6 +23,7 @@ backend/                 FastAPI application
     services/            File storage and reusable video metadata logic
 frontend/                Next.js application
 uploads/                 Uploaded source videos (runtime data)
+thumbnails/              Generated middle-frame thumbnails (runtime data)
 clips/                   Reserved for a later phase
 frames/                  Reserved for a later phase
 temp/                    Reserved for temporary runtime data
@@ -102,6 +103,31 @@ Files are streamed to `uploads/` with collision-resistant names, then probed wit
 
 Invalid or corrupted video content returns `422`. A probe timeout returns `504`, and an unavailable ffprobe executable returns `503`.
 
+### Analyze video
+
+`POST /api/v1/analyze` as `multipart/form-data`, using the form field `file`.
+
+Accepted extensions: `.mp4`, `.mov`, `.mkv`, `.avi`, and `.webm`. The endpoint enforces the configured upload limit, validates the media with FFprobe, and generates one JPEG thumbnail at the middle of the video.
+
+```json
+{
+  "success": true,
+  "filename": "demo.mp4",
+  "duration": 12.54,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30.0,
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "bitrate": 4200000,
+  "rotation": null,
+  "thumbnail": "/thumbnails/demo-<unique-id>.jpg",
+  "filesize": 6599250
+}
+```
+
+Generated thumbnails are served by the backend under `/thumbnails/<filename>`. Videos without audio return `null` for `audio_codec`; videos without rotation metadata return `null` for `rotation`. Empty uploads return `400`, unsupported extensions return `415`, oversized files return `413`, corrupted media returns `422`, unavailable FFmpeg tools return `503`, and processing timeouts return `504`.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` for the backend and to `frontend/.env.local` for the frontend. Update CORS origins before deploying to a non-local environment.
@@ -115,6 +141,6 @@ npm run lint
 npm run build
 ```
 
-## Milestone 2 boundaries
+## Milestone 3 boundaries
 
-This milestone integrates only FFmpeg metadata probing. It does not include Gemini, Whisper, OpenCV, frame extraction, scene detection, authentication, or any AI Analyze action. The Analyze button remains a later-phase placeholder.
+This milestone implements deterministic technical video analysis and one thumbnail only. It does not include Gemini, Whisper, OpenCV, bulk frame extraction, scene detection, authentication, or any AI analysis.

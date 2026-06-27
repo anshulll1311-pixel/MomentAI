@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
@@ -30,8 +31,8 @@ def create_application() -> FastAPI:
     configure_logging(settings.log_level)
     application = FastAPI(
         title=settings.app_name,
-        version="0.2.0",
-        description="MomentAI Milestone 2 video upload and metadata API.",
+        version="0.3.0",
+        description="MomentAI Milestone 3 video analysis API.",
         lifespan=lifespan,
     )
 
@@ -43,6 +44,11 @@ def create_application() -> FastAPI:
         allow_headers=["Accept", "Content-Type"],
     )
     application.include_router(api_router, prefix=settings.api_prefix)
+    application.mount(
+        "/thumbnails",
+        StaticFiles(directory=settings.thumbnail_dir, check_dir=False),
+        name="thumbnails",
+    )
     return application
 
 

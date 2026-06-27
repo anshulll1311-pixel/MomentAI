@@ -2,10 +2,12 @@
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 
-import { uploadVideo } from "@/lib/api";
+import { analyzeVideo, backendAssetUrl, uploadVideo } from "@/lib/api";
+import type { AnalysisResponse } from "@/lib/api";
 
-const ACCEPTED_EXTENSIONS = ["mp4", "mov", "mkv", "avi"] as const;
+const ACCEPTED_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"] as const;
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
+type AnalysisState = "idle" | "analyzing" | "complete" | "error";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -22,6 +24,8 @@ export function UploadPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [state, setState] = useState<UploadState>("idle");
+  const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
+  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [message, setMessage] = useState<string>("");
 
   function selectFile(nextFile: File | undefined) {
@@ -29,12 +33,16 @@ export function UploadPanel() {
     if (!isAcceptedFile(nextFile)) {
       setFile(null);
       setState("error");
-      setMessage("Choose an MP4, MOV, MKV, or AVI video.");
+      setAnalysisState("idle");
+      setAnalysis(null);
+      setMessage("Choose an MP4, MOV, MKV, AVI, or WebM video.");
       return;
     }
 
     setFile(nextFile);
     setState("idle");
+    setAnalysisState("idle");
+    setAnalysis(null);
     setMessage("");
   }
 
@@ -63,6 +71,23 @@ export function UploadPanel() {
     }
   }
 
+  async function handleAnalyze() {
+    if (!file || state !== "uploaded" || analysisState === "analyzing") return;
+    setAnalysisState("analyzing");
+    setAnalysis(null);
+    setMessage("");
+
+    try {
+      const result = await analyzeVideo(file);
+      setAnalysis(result);
+      setAnalysisState("complete");
+      setMessage(`${result.filename} analyzed successfully.`);
+    } catch (error) {
+      setAnalysisState("error");
+      setMessage(error instanceof Error ? error.message : "Analysis failed. Please try again.");
+    }
+  }
+
   return (
     <div className="rounded-3xl border border-white/10 bg-panel/90 p-3 shadow-2xl shadow-black/30 backdrop-blur sm:p-5">
       <div
@@ -82,7 +107,7 @@ export function UploadPanel() {
         <input
           ref={inputRef}
           type="file"
-          accept=".mp4,.mov,.mkv,.avi,video/mp4,video/quicktime,video/x-matroska,video/x-msvideo"
+          accept=".mp4,.mov,.mkv,.avi,.webm,video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm"
           onChange={handleInputChange}
           className="sr-only"
         />
@@ -100,7 +125,7 @@ export function UploadPanel() {
           ) : (
             <>
               <p className="text-base font-medium text-zinc-200">Drag &amp; drop your video here</p>
-              <p className="mt-2 text-sm text-zinc-500">MP4, MOV, MKV, or AVI</p>
+              <p className="mt-2 text-sm text-zinc-500">MP4, MOV, MKV, AVI, or WebM</p>
             </>
           )}
 
@@ -125,21 +150,58 @@ export function UploadPanel() {
         </button>
         <button
           type="button"
-          disabled={state !== "uploaded"}
-          title={state === "uploaded" ? "Analysis will be implemented in a later phase" : "Upload a video first"}
+          onClick={handleAnalyze}
+          disabled={state !== "uploaded" || analysisState === "analyzing"}
+          title={state === "uploaded" ? "Analyze video" : "Upload a video first"}
           className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:border-violet-400/40 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-transparent disabled:text-zinc-600"
         >
-          Analyze
+          {analysisState === "analyzing" ? "Analyzing…" : "Analyze"}
         </button>
       </div>
 
       <div className="min-h-7 pt-3 text-left" aria-live="polite">
         {message && (
-          <p className={`text-sm ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>
+          <p className={`text-sm ${state === "error" || analysisState === "error" ? "text-rose-400" : "text-emerald-400"}`}>
             {message}
           </p>
         )}
       </div>
+
+      {analysis && (
+        <div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025] text-left">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={backendAssetUrl(analysis.thumbnail)}
+            alt={`Middle-frame thumbnail for ${analysis.filename}`}
+            className="aspect-video w-full bg-black object-cover"
+          />
+          <dl className="grid grid-cols-2 gap-x-5 gap-y-4 p-5 text-sm sm:grid-cols-3">
+            <AnalysisItem label="Filename" value={analysis.filename} />
+            <AnalysisItem label="Duration" value={`${analysis.duration.toFixed(2)} s`} />
+            <AnalysisItem label="Resolution" value={`${analysis.width} × ${analysis.height}`} />
+            <AnalysisItem label="FPS" value={analysis.fps.toFixed(2)} />
+            <AnalysisItem
+              label="Codecs"
+              value={`${analysis.video_codec.toUpperCase()} / ${analysis.audio_codec?.toUpperCase() ?? "No audio"}`}
+            />
+            <AnalysisItem label="Bitrate" value={`${(analysis.bitrate / 1_000_000).toFixed(2)} Mbps`} />
+            {analysis.rotation !== null && (
+              <AnalysisItem label="Rotation" value={`${analysis.rotation}°`} />
+            )}
+          </dl>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalysisItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1 truncate font-medium text-zinc-200" title={value}>
+        {value}
+      </dd>
     </div>
   );
 }
