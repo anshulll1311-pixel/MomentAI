@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime media
+uploads/*
+!uploads/.gitkeep
+clips/*
+!clips/.gitkeep
+frames/*
+!frames/.gitkeep
+temp/*
+!temp/.gitkeep
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
