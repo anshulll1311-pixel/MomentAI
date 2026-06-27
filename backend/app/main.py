@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
+from backend.app.core.logging import configure_logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -14,16 +19,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     for directory in settings.runtime_directories:
         directory.mkdir(parents=True, exist_ok=True)
+    logger.info("MomentAI API started in %s mode", settings.environment)
     yield
+    logger.info("MomentAI API stopped")
 
 
 def create_application() -> FastAPI:
     """Create and configure the MomentAI API application."""
     settings = get_settings()
+    configure_logging(settings.log_level)
     application = FastAPI(
         title=settings.app_name,
-        version="0.1.0",
-        description="MomentAI Phase 1 upload API.",
+        version="0.2.0",
+        description="MomentAI Milestone 2 video upload and metadata API.",
         lifespan=lifespan,
     )
 

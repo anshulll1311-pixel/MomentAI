@@ -5,6 +5,15 @@ export interface UploadResponse {
   filename: string;
   size_bytes: number;
   content_type: string | null;
+  metadata: {
+    duration_seconds: number;
+    width: number;
+    height: number;
+    fps: number;
+    video_codec: string;
+    audio_codec: string | null;
+    file_size_bytes: number;
+  };
 }
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");

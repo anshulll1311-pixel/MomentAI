@@ -1,11 +1,12 @@
 # MomentAI
 
-MomentAI is a production-oriented AI SaaS foundation. This repository currently contains **Phase 1 only**: a FastAPI upload API and a Next.js upload interface. It intentionally contains no AI, analysis, media-processing, or authentication features.
+MomentAI is a production-oriented AI SaaS foundation. The current **Milestone 2** backend accepts video uploads and extracts technical metadata through FFmpeg's `ffprobe`. It intentionally contains no AI analysis, transcription, frame extraction, or authentication features.
 
 ## Stack
 
 - Python 3.14
 - FastAPI
+- FFmpeg / ffprobe
 - Next.js 15
 - React 19
 - TypeScript
@@ -19,7 +20,7 @@ backend/                 FastAPI application
     api/routes/          HTTP endpoint handlers
     core/                Environment configuration
     schemas/             API response contracts
-    services/            File-storage business logic
+    services/            File storage and reusable video metadata logic
 frontend/                Next.js application
 uploads/                 Uploaded source videos (runtime data)
 clips/                   Reserved for a later phase
@@ -32,6 +33,7 @@ temp/                    Reserved for temporary runtime data
 From the repository root:
 
 ```powershell
+ffprobe -version
 py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -39,7 +41,9 @@ Copy-Item .env.example .env
 uvicorn backend.app.main:app --reload
 ```
 
-The API runs at `http://localhost:8000`. Interactive documentation is available at `http://localhost:8000/docs`.
+Run the Uvicorn command from the repository root; backend imports consistently use the `backend.app` package namespace.
+
+The API runs at `http://localhost:8000`. Interactive documentation is available at `http://localhost:8000/docs`. FFmpeg must be installed with `ffprobe` available in `PATH`, or `MOMENTAI_FFPROBE_BINARY` must point to the executable.
 
 ## Frontend setup
 
@@ -81,11 +85,22 @@ Accepted filename extensions: `.mp4`, `.mov`, `.mkv`, and `.avi`.
   "original_filename": "demo.mp4",
   "filename": "demo-<unique-id>.mp4",
   "size_bytes": 123456,
-  "content_type": "video/mp4"
+  "content_type": "video/mp4",
+  "metadata": {
+    "duration_seconds": 12.5,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "file_size_bytes": 123456
+  }
 }
 ```
 
-Files are streamed to `uploads/` with collision-resistant names. Upload size is bounded by `MOMENTAI_MAX_UPLOAD_SIZE_MB` (500 MB by default). Partial files are deleted if validation or writing fails.
+Files are streamed to `uploads/` with collision-resistant names, then probed without invoking a shell. Upload size is bounded by `MOMENTAI_MAX_UPLOAD_SIZE_MB` (500 MB by default), and metadata probing is bounded by `MOMENTAI_FFPROBE_TIMEOUT_SECONDS` (30 seconds by default). Partial, corrupted, and invalid video files are deleted when processing fails. Videos without an audio stream return `null` for `audio_codec`.
+
+Invalid or corrupted video content returns `422`. A probe timeout returns `504`, and an unavailable ffprobe executable returns `503`.
 
 ## Environment variables
 
@@ -100,6 +115,6 @@ npm run lint
 npm run build
 ```
 
-## Phase 1 boundaries
+## Milestone 2 boundaries
 
-This phase does not include Gemini, FFmpeg, Whisper, OpenCV, scene detection, authentication, or any Analyze action. The Analyze button only reflects that an upload has completed; processing belongs to a later phase.
+This milestone integrates only FFmpeg metadata probing. It does not include Gemini, Whisper, OpenCV, frame extraction, scene detection, authentication, or any AI Analyze action. The Analyze button remains a later-phase placeholder.

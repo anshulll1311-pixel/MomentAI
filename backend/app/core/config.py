@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     cors_origins: str = "http://localhost:3000"
+    log_level: str = "INFO"
     max_upload_size_mb: int = Field(default=500, gt=0)
     upload_dir: Path = Path("uploads")
+    ffprobe_binary: str = "ffprobe"
+    ffprobe_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
     @property
     def cors_origin_list(self) -> list[str]:

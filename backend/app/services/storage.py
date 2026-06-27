@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from fastapi import UploadFile
 
 ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".avi"})
 CHUNK_SIZE_BYTES = 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class InvalidFileTypeError(ValueError):
@@ -24,6 +26,7 @@ class StoredUpload:
     filename: str
     size_bytes: int
     content_type: str | None
+    path: Path
 
 
 def _build_storage_name(original_filename: str) -> tuple[str, str]:
@@ -52,6 +55,7 @@ async def store_upload(
     destination.mkdir(parents=True, exist_ok=True)
     output_path = destination / storage_name
     total_bytes = 0
+    logger.info("Storing upload %s as %s", original_name, storage_name)
 
     try:
         async with aiofiles.open(output_path, "xb") as output:
@@ -64,11 +68,14 @@ async def store_upload(
                 await output.write(chunk)
     except Exception:
         output_path.unlink(missing_ok=True)
+        logger.exception("Upload storage failed for %s", storage_name)
         raise
 
+    logger.info("Stored upload %s (%s bytes)", storage_name, total_bytes)
     return StoredUpload(
         original_filename=original_name,
         filename=storage_name,
         size_bytes=total_bytes,
         content_type=upload.content_type,
+        path=output_path,
     )
