@@ -31,8 +31,8 @@ def create_application() -> FastAPI:
     configure_logging(settings.log_level)
     application = FastAPI(
         title=settings.app_name,
-        version="0.4.0",
-        description="MomentAI Milestone 4A scene detection API.",
+        version="0.4.1",
+        description="MomentAI Milestone 4B transcript foundation API.",
         lifespan=lifespan,
     )
 

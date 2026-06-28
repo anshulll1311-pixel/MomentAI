@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     scene_threshold: float = Field(default=0.3, gt=0, lt=1)
     minimum_scene_duration_seconds: float = Field(default=0.5, gt=0)
     scene_detection_timeout_seconds: float = Field(default=120.0, gt=0, le=1800)
+    transcript_temp_dir: Path = Path("temp/transcripts")
+    whisper_model_dir: Path = Path("temp/whisper-models")
+    whisper_model_size: str = "tiny.en"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_beam_size: int = Field(default=5, gt=0, le=20)
+    audio_extraction_timeout_seconds: float = Field(default=60.0, gt=0, le=1800)
+    transcription_timeout_seconds: float = Field(default=600.0, gt=0, le=7200)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -50,6 +58,8 @@ class Settings(BaseSettings):
             PROJECT_ROOT / "clips",
             PROJECT_ROOT / "frames",
             PROJECT_ROOT / "temp",
+            self.transcript_temp_dir,
+            self.whisper_model_dir,
         )
 
     def model_post_init(self, __context: object) -> None:
@@ -57,6 +67,10 @@ class Settings(BaseSettings):
             self.upload_dir = PROJECT_ROOT / self.upload_dir
         if not self.thumbnail_dir.is_absolute():
             self.thumbnail_dir = PROJECT_ROOT / self.thumbnail_dir
+        if not self.transcript_temp_dir.is_absolute():
+            self.transcript_temp_dir = PROJECT_ROOT / self.transcript_temp_dir
+        if not self.whisper_model_dir.is_absolute():
+            self.whisper_model_dir = PROJECT_ROOT / self.whisper_model_dir
 
 
 @lru_cache

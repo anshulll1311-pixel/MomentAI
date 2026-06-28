@@ -75,8 +75,7 @@ class SceneService:
 
     async def detect_scenes(self, video_path: Path) -> SceneDetectionResult:
         metadata = await self._video_service.extract_metadata(video_path)
-        cut_times = await self._detect_cut_times(video_path, metadata.duration_seconds)
-        boundaries = self._build_boundaries(cut_times, metadata.duration_seconds)
+        boundaries = await self.detect_boundaries(video_path, metadata.duration_seconds)
         scene_directory = self._thumbnail_directory / "scenes" / video_path.stem
 
         logger.info("Detected %s scene boundaries for %s", len(boundaries) - 2, video_path.name)
@@ -107,6 +106,15 @@ class SceneService:
             duration_seconds=metadata.duration_seconds,
             scenes=tuple(scenes),
         )
+
+    async def detect_boundaries(
+        self,
+        video_path: Path,
+        duration_seconds: float,
+    ) -> tuple[float, ...]:
+        """Return scene boundaries without generating thumbnails."""
+        cut_times = await self._detect_cut_times(video_path, duration_seconds)
+        return tuple(self._build_boundaries(cut_times, duration_seconds))
 
     async def _detect_cut_times(self, video_path: Path, duration_seconds: float) -> list[float]:
         scene_filter = f"select='gt(scene,{self._threshold:.6f})',showinfo"
