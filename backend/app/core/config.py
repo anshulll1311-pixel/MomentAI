@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     export_temp_dir: Path = Path("temp/exports")
     export_ffmpeg_timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     export_ffprobe_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    analysis_configuration_version: str = "1"
+    gemini_api_key: SecretStr | None = None
+    gemini_model_id: str | None = None
+    gemini_model_version: str | None = None
+    gemini_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    semantic_provider_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
 
     @property
     def cors_origin_list(self) -> list[str]:

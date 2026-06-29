@@ -9,7 +9,10 @@ from backend.app.semantic.models import (
 )
 from backend.app.semantic.prompts import PromptRegistry, PromptRenderer
 from backend.app.semantic.providers import BaseAIProvider, ProviderRegistry
-from backend.app.semantic.service import SemanticIntelligenceService
+from backend.app.semantic.service import (
+    SemanticIntelligenceService,
+    create_semantic_intelligence_service,
+)
 from backend.app.semantic.validation import SemanticOutputValidator
 
 __all__ = (
@@ -28,4 +31,5 @@ __all__ = (
     "SemanticOutputValidator",
     "SemanticResult",
     "SemanticResultStatus",
+    "create_semantic_intelligence_service",
 )

@@ -47,17 +47,19 @@ class VideoAnalyzer:
 
     async def analyze(self, video_path: Path) -> VideoAnalysis:
         metadata = await self._video_service.extract_metadata(video_path)
-        thumbnail_path = await self._generate_thumbnail(
+        thumbnail_path = await self.generate_thumbnail(
             video_path=video_path,
             timestamp_seconds=metadata.duration_seconds / 2,
         )
         return VideoAnalysis(metadata=metadata, thumbnail_path=thumbnail_path)
 
-    async def _generate_thumbnail(
+    async def generate_thumbnail(
         self,
         video_path: Path,
         timestamp_seconds: float,
     ) -> Path:
+        """Generate a reusable thumbnail without probing metadata again."""
+
         self._thumbnail_directory.mkdir(parents=True, exist_ok=True)
         thumbnail_path = self._thumbnail_directory / f"{video_path.stem}.jpg"
         command = (

@@ -33,7 +33,11 @@ from backend.app.semantic.models import (
     SemanticResultStatus,
     SemanticTrace,
 )
-from backend.app.semantic.prompts import PromptRegistry, PromptRenderer
+from backend.app.semantic.prompts import (
+    PromptRegistry,
+    PromptRenderer,
+    default_semantic_prompts,
+)
 from backend.app.semantic.providers import ProviderRegistry
 from backend.app.semantic.validation import (
     SEMANTIC_RESPONSE_SCHEMA,
@@ -316,6 +320,27 @@ class SemanticIntelligenceService:
             ),
             diagnostics=diagnostics,
         )
+
+
+def create_semantic_intelligence_service(
+    provider_registry: ProviderRegistry,
+    *,
+    cache: SemanticCache | None = None,
+    provider_timeout_seconds: float = 60.0,
+) -> SemanticIntelligenceService:
+    """Compose semantic generation around an application-supplied provider registry."""
+
+    return SemanticIntelligenceService(
+        context_builder=SemanticContextBuilder(),
+        batch_planner=SemanticBatchPlanner(),
+        provider_registry=provider_registry,
+        prompt_registry=PromptRegistry(default_semantic_prompts()),
+        prompt_renderer=PromptRenderer(),
+        output_validator=SemanticOutputValidator(),
+        fallback_factory=SemanticFallbackFactory(),
+        cache=cache,
+        provider_timeout_seconds=provider_timeout_seconds,
+    )
 
 
 def _validate_prompt_versions(prompt: PromptTemplate) -> None:

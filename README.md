@@ -2,7 +2,7 @@
 
 MomentAI is a production-oriented video intelligence SaaS foundation. It accepts uploaded videos, extracts technical metadata, detects scenes, generates timestamped transcripts, deterministically ranks notable moments, and exports those moments as downloadable MP4 clips and ZIP packages.
 
-The current release is **Milestone 6A**. Analysis and export run locally through FastAPI, FFmpeg, FFprobe, and faster-whisper. The Moment Intelligence Engine (MIE) is deterministic; no Gemini, OpenAI, or other semantic AI provider is implemented yet.
+The current release is **Milestone 7D**. Videos produce one reusable immutable analysis addressed by `analysis_id`. Deterministic ranking, optional Gemini semantic generation, and export consume that stored analysis without rerunning the media pipeline.
 
 ## Project overview
 
@@ -19,6 +19,9 @@ MomentAI currently provides:
 - Five FFmpeg output presets
 - Validated MP4 clips, versioned manifests, checksums, and ZIP packages
 - Local artifact storage with temporary-file cleanup
+- Replaceable analysis repository with single-flight fingerprint deduplication
+- Analysis lifecycle hooks and provider-neutral artifact references
+- Versioned semantic prompts, validation, deterministic fallback, and Gemini infrastructure
 
 Supported source extensions are `.mp4`, `.mov`, `.mkv`, `.avi`, and `.webm`.
 
@@ -27,13 +30,17 @@ Supported source extensions are `.mp4`, `.mov`, `.mkv`, `.avi`, and `.webm`.
 ```mermaid
 flowchart LR
     Client["Next.js client or API consumer"] --> API["FastAPI routes"]
-    API --> Storage["Upload storage"]
+    API --> Coordinator["AnalysisCoordinator"]
+    Coordinator --> Repository["AnalysisRepository"]
+    Coordinator --> Storage["ArtifactManager / source storage"]
     Storage --> Video["VideoService / FFprobe"]
     Video --> Scenes["SceneService / FFmpeg"]
     Scenes --> Transcript["TranscriptService / faster-whisper"]
     Transcript --> MIE["Moment Intelligence Engine"]
-    MIE --> Analysis["Immutable AnalysisResult"]
+    MIE --> Analysis["Immutable AnalysisResult + analysis_id"]
+    Analysis --> Repository
     Analysis --> Moments["Ranked moments response"]
+    Analysis --> Semantic["SemanticIntelligenceService"]
     Analysis --> Planner["ExportPlanner"]
     Planner --> Extractor["ClipExtractor / FFmpeg"]
     Extractor --> Validator["FFprobeOutputValidator"]
@@ -46,11 +53,13 @@ Application boundaries:
 
 ```text
 backend/app/
-├── api/routes/       FastAPI request and download handlers
+├── analysis/         Repository, coordinator, hooks, and artifact lifecycle
+├── api/              FastAPI routes, composition, and response presenters
 ├── core/             Configuration, logging, and version metadata
 ├── schemas/          Pydantic API contracts
 ├── services/         Video, scene, transcript, storage, and pipeline services
 ├── intelligence/     Deterministic Moment Intelligence Engine
+├── semantic/         Prompts, providers, validation, fallback, and orchestration
 └── exporting/        Synchronous export planning, extraction, validation, and packaging
 ```
 
@@ -69,7 +78,11 @@ Runtime media is excluded from Git.
 ## Current pipeline
 
 ```text
-Upload
+Upload once
+  ↓
+AnalysisCoordinator
+  ├──→ AnalysisRepository lifecycle record
+  └──→ MomentPipelineService
   ↓
 VideoService
   ↓
@@ -79,8 +92,9 @@ TranscriptService
   ↓
 Moment Intelligence Engine
   ↓
-Immutable AnalysisResult
-  ├──→ /api/v1/moments response
+Immutable AnalysisResult + analysis_id
+  ├──→ ranked moments
+  ├──→ SemanticIntelligenceService
   └──→ ExportEngine
           ↓
        ExportPlanner
@@ -93,6 +107,8 @@ Immutable AnalysisResult
 ```
 
 `MomentPipelineService` performs analysis once and returns an immutable `AnalysisResult` containing the source fingerprint, video metadata, scenes, optional transcript, MIE result, and diagnostics. The moments route serializes this result. The export route passes the same result object to `ExportEngine`; `ExportEngine` cannot invoke or rerun the analysis pipeline.
+
+`AnalysisCoordinator` stores the result behind an `analysis_id`. Equivalent uploads are deduplicated using the source fingerprint, profile, pipeline/MIE versions, and configured analysis version. The development repository is process-local and can be replaced by a database repository without changing MIE, semantic generation, or export.
 
 Transcript failure is degradable. A video without usable audio can still produce scene-based ranked moments and exports, with a structured transcript diagnostic.
 
@@ -108,6 +124,10 @@ Transcript failure is degradable. A video without usable audio can still produce
 | Milestone 5A | Complete | Modular deterministic Moment Intelligence Engine foundation |
 | Milestone 5B | Complete | Real scene/transcript pipeline integration and ranked moments API |
 | Milestone 6A | Complete | Synchronous clip export, presets, validation, manifests, ZIP packaging, and downloads |
+| Milestone 7A | Complete | Semantic foundation, immutable models, prompts, caching and batching abstractions |
+| Milestone 7B | Complete | Gemini provider infrastructure, structured output, retries, safety and diagnostics |
+| Milestone 7C | Complete | Batched semantic generation, validation and deterministic fallback |
+| Milestone 7D | Complete | Analysis repository, lifecycle coordinator, artifact manager and ID-based consumers |
 
 ## Moment Intelligence Engine
 
@@ -201,8 +221,14 @@ The default API prefix is `/api/v1`.
 | `GET` | `/api/v1/exports/{export_id}/clips/{clip_id}` | Download an exported MP4 clip | 200 |
 | `GET` | `/api/v1/exports/{export_id}/manifest` | Download the JSON export manifest | 200 |
 | `GET` | `/api/v1/exports/{export_id}/package` | Download the ZIP package | 200 |
+| `POST` | `/api/v1/analyses` | Upload once and create or reuse an immutable analysis | 201 |
+| `GET` | `/api/v1/analyses/{analysis_id}` | Read analysis status and summary | 200 |
+| `GET` | `/api/v1/analyses/{analysis_id}/moments` | Read stored ranked moments | 200 |
+| `POST` | `/api/v1/analyses/{analysis_id}/semantic` | Generate semantic metadata from stored analysis | 200 |
+| `POST` | `/api/v1/analyses/{analysis_id}/export` | Export stored ranked moments | 201 |
+| `DELETE` | `/api/v1/analyses/{analysis_id}` | Expire analysis and managed artifacts | 200 |
 
-All upload endpoints use `multipart/form-data` with the source video in the `file` field.
+New clients should upload through `/api/v1/analyses` and use the returned `analysis_id`. Existing file-based endpoints remain compatible but are marked deprecated and delegate to the same deduplicating coordinator.
 
 ### Export request fields
 
@@ -295,6 +321,10 @@ MOMENTAI_EXPORT_DIR
 MOMENTAI_EXPORT_TEMP_DIR
 MOMENTAI_EXPORT_FFMPEG_TIMEOUT_SECONDS
 MOMENTAI_EXPORT_FFPROBE_TIMEOUT_SECONDS
+MOMENTAI_ANALYSIS_CONFIGURATION_VERSION
+MOMENTAI_GEMINI_API_KEY
+MOMENTAI_GEMINI_MODEL_ID
+MOMENTAI_SEMANTIC_PROVIDER_TIMEOUT_SECONDS
 ```
 
 See `.env.example` for the complete configuration.
@@ -348,10 +378,10 @@ Real-media integration testing requires FFmpeg, FFprobe, and the configured fast
 
 - Motion and audio-energy analyzers
 - Face and emotion signals
-- Semantic AI provider adapters
+- Additional semantic provider adapters and prompt versions
 - Domain ranking profiles
 - Viral-potential research and evaluation
-- Persistent analysis caching
+- PostgreSQL AnalysisRepository and object-storage artifacts
 
 ### SaaS production readiness
 

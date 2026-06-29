@@ -35,6 +35,7 @@ SEMANTIC_RESPONSE_SCHEMA: Mapping[str, Any] = MappingProxyType(
         "properties": {
             "moments": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "required": [
@@ -43,10 +44,31 @@ SEMANTIC_RESPONSE_SCHEMA: Mapping[str, Any] = MappingProxyType(
                         "description",
                         "hashtags",
                         "explanation",
-                        "category",
-                        "viral_potential",
                     ],
                     "additionalProperties": False,
+                    "properties": {
+                        "candidate_id": {"type": "string", "minLength": 1},
+                        "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120,
+                        },
+                        "description": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000,
+                        },
+                        "hashtags": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "explanation": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000,
+                        },
+                    },
                 },
             }
         },
@@ -119,7 +141,7 @@ class SemanticOutputValidator:
                 continue
             try:
                 valid.append(self._normalize(output))
-            except ValueError as error:
+            except (TypeError, ValueError) as error:
                 invalid.add(candidate_id)
                 diagnostics.append(_diagnostic(str(error), candidate_id, provider_id))
 
@@ -160,20 +182,22 @@ class SemanticOutputValidator:
         hashtags = tuple(_normalize_hashtag(value) for value in output.hashtags)
         if len(hashtags) != len(set(tag.lower() for tag in hashtags)):
             raise ValueError("Provider returned duplicate hashtags.")
-        if output.category is None:
-            raise ValueError("Provider output is missing category classification.")
-        category_id = output.category.category_id.strip().lower()
-        if category_id not in self._categories:
-            raise ValueError(f"Provider returned an unknown category: {category_id}.")
-        _unit_interval(output.category.confidence, "category confidence")
-        category = CategoryPrediction(
-            category_id=category_id,
-            label=self._categories[category_id],
-            confidence=output.category.confidence,
+        category = None
+        if output.category is not None:
+            category_id = output.category.category_id.strip().lower()
+            if category_id not in self._categories:
+                raise ValueError(f"Provider returned an unknown category: {category_id}.")
+            _unit_interval(output.category.confidence, "category confidence")
+            category = CategoryPrediction(
+                category_id=category_id,
+                label=self._categories[category_id],
+                confidence=output.category.confidence,
+            )
+        viral = (
+            _validated_viral(output.viral_potential)
+            if output.viral_potential is not None
+            else None
         )
-        if output.viral_potential is None:
-            raise ValueError("Provider output is missing viral potential estimation.")
-        viral = _validated_viral(output.viral_potential)
         return ProviderMomentOutput(
             candidate_id=output.candidate_id,
             title=title,

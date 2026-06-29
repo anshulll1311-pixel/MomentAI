@@ -1,44 +1,20 @@
-import logging
-from pathlib import Path
+"""Backward-compatible transcript projection from a reusable analysis."""
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from backend.app.analysis import AnalysisExecutionError
+from backend.app.api.analysis_errors import pipeline_http_exception
+from backend.app.api.dependencies import get_analysis_coordinator
 from backend.app.core.config import get_settings
 from backend.app.schemas.transcript import TranscriptResponse, TranscriptSegmentResponse
-from backend.app.services.scene_service import (
-    SceneDetectionError,
-    SceneService,
-    SceneServiceError,
-    SceneTimeoutError,
-    SceneToolUnavailableError,
-)
 from backend.app.services.storage import (
     EmptyFileError,
     FileTooLargeError,
     InvalidFileTypeError,
     store_upload,
 )
-from backend.app.services.transcript_service import (
-    AudioExtractionError,
-    AudioToolUnavailableError,
-    EmptyTranscriptError,
-    MissingAudioError,
-    TranscriptService,
-    TranscriptServiceError,
-    TranscriptionError,
-    TranscriptionTimeoutError,
-    TranscriptionUnavailableError,
-)
-from backend.app.services.video_service import (
-    InvalidVideoError,
-    VideoProbeTimeoutError,
-    VideoProcessingError,
-    VideoService,
-    VideoToolUnavailableError,
-)
 
 router = APIRouter(tags=["transcript"])
-logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -46,10 +22,10 @@ logger = logging.getLogger(__name__)
     response_model=TranscriptResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Generate a timestamped video transcript",
+    deprecated=True,
 )
 async def create_video_transcript(file: UploadFile = File(...)) -> TranscriptResponse:
     settings = get_settings()
-
     try:
         stored = await store_upload(
             upload=file,
@@ -71,89 +47,31 @@ async def create_video_transcript(file: UploadFile = File(...)) -> TranscriptRes
     finally:
         await file.close()
 
-    video_service = VideoService(
-        ffprobe_binary=settings.ffprobe_binary,
-        timeout_seconds=settings.ffprobe_timeout_seconds,
-    )
-    scene_service = SceneService(
-        video_service=video_service,
-        thumbnail_directory=settings.thumbnail_dir,
-        ffmpeg_binary=settings.ffmpeg_binary,
-        threshold=settings.scene_threshold,
-        minimum_scene_duration_seconds=settings.minimum_scene_duration_seconds,
-        detection_timeout_seconds=settings.scene_detection_timeout_seconds,
-        thumbnail_timeout_seconds=settings.ffmpeg_timeout_seconds,
-    )
-    transcript_service = TranscriptService(
-        video_service=video_service,
-        scene_service=scene_service,
-        temporary_directory=settings.transcript_temp_dir,
-        model_directory=settings.whisper_model_dir,
-        ffmpeg_binary=settings.ffmpeg_binary,
-        model_size=settings.whisper_model_size,
-        device=settings.whisper_device,
-        compute_type=settings.whisper_compute_type,
-        beam_size=settings.whisper_beam_size,
-        audio_timeout_seconds=settings.audio_extraction_timeout_seconds,
-        transcription_timeout_seconds=settings.transcription_timeout_seconds,
-    )
-
     try:
-        result = await transcript_service.transcribe(stored.path)
-    except (MissingAudioError, EmptyTranscriptError, AudioExtractionError) as error:
-        _discard_upload(stored.path)
+        coordinated = await get_analysis_coordinator().create_or_reuse(
+            source_path=stored.path,
+            source_filename=stored.original_filename,
+        )
+    except AnalysisExecutionError as error:
+        raise pipeline_http_exception(error) from error
+    result = coordinated.record.result
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Analysis is not ready.")
+    transcript = result.transcript_result
+    if transcript is None:
+        diagnostic = next(
+            (item.message for item in result.diagnostics if item.stage == "transcript"),
+            "A transcript could not be generated for this video.",
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except InvalidVideoError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except (VideoProbeTimeoutError, SceneTimeoutError, TranscriptionTimeoutError) as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=str(error),
-        ) from error
-    except (
-        VideoToolUnavailableError,
-        SceneToolUnavailableError,
-        AudioToolUnavailableError,
-        TranscriptionUnavailableError,
-    ) as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except SceneDetectionError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except (VideoProcessingError, SceneServiceError, TranscriptionError) as error:
-        _discard_upload(stored.path)
-        logger.exception("Transcript processing failed for %s", stored.filename)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Transcript processing failed.",
-        ) from error
-    except TranscriptServiceError as error:
-        _discard_upload(stored.path)
-        logger.exception("Unexpected transcript error for %s", stored.filename)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Transcript processing failed.",
-        ) from error
+            detail=diagnostic,
+        )
 
     return TranscriptResponse(
         success=True,
-        language=result.language,
-        duration=round(result.duration_seconds, 3),
+        language=transcript.language,
+        duration=round(transcript.duration_seconds, 3),
         segments=[
             TranscriptSegmentResponse(
                 start=round(segment.start_seconds, 3),
@@ -161,14 +79,6 @@ async def create_video_transcript(file: UploadFile = File(...)) -> TranscriptRes
                 text=segment.text,
                 scene_id=segment.scene_id,
             )
-            for segment in result.segments
+            for segment in transcript.segments
         ],
     )
-
-
-def _discard_upload(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-        logger.info("Removed failed transcript upload %s", path.name)
-    except OSError:
-        logger.exception("Failed to remove transcript upload %s", path.name)

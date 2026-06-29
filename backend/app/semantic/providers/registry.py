@@ -31,5 +31,16 @@ class ProviderRegistry:
     def metadata(self) -> tuple[ProviderMetadata, ...]:
         return tuple(provider.metadata for provider in self._ordered)
 
+    @property
+    def provider_ids(self) -> tuple[str, ...]:
+        """Return provider IDs in deterministic resolution order."""
+
+        return tuple(self._providers)
+
+    def is_registered(self, provider_id: str) -> bool:
+        """Check registration without resolving or raising."""
+
+        return provider_id in self._providers
+
     def __len__(self) -> int:
         return len(self._ordered)

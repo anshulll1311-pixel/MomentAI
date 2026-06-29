@@ -1,8 +1,10 @@
-import logging
-from pathlib import Path
+"""Backward-compatible upload projection over the reusable analysis lifecycle."""
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from backend.app.analysis import AnalysisExecutionError
+from backend.app.api.analysis_errors import pipeline_http_exception
+from backend.app.api.dependencies import get_analysis_coordinator
 from backend.app.core.config import get_settings
 from backend.app.schemas.upload import UploadResponse, VideoMetadataResponse
 from backend.app.services.storage import (
@@ -11,16 +13,8 @@ from backend.app.services.storage import (
     InvalidFileTypeError,
     store_upload,
 )
-from backend.app.services.video_service import (
-    InvalidVideoError,
-    VideoProbeTimeoutError,
-    VideoProcessingError,
-    VideoService,
-    VideoToolUnavailableError,
-)
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
-logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -28,10 +22,12 @@ logger = logging.getLogger(__name__)
     response_model=UploadResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a source video",
+    deprecated=True,
 )
 async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
-    settings = get_settings()
+    """Compatibility adapter; canonical clients use POST /analyses."""
 
+    settings = get_settings()
     try:
         stored = await store_upload(
             upload=file,
@@ -53,44 +49,23 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
     finally:
         await file.close()
 
-    video_service = VideoService(
-        ffprobe_binary=settings.ffprobe_binary,
-        timeout_seconds=settings.ffprobe_timeout_seconds,
-    )
     try:
-        metadata = await video_service.extract_metadata(stored.path)
-    except InvalidVideoError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except VideoProbeTimeoutError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=str(error),
-        ) from error
-    except VideoToolUnavailableError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except VideoProcessingError as error:
-        _discard_upload(stored.path)
-        logger.exception("Video metadata processing failed for %s", stored.filename)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Video metadata processing failed.",
-        ) from error
-
+        coordinated = await get_analysis_coordinator().create_or_reuse(
+            source_path=stored.path,
+            source_filename=stored.original_filename,
+        )
+    except AnalysisExecutionError as error:
+        raise pipeline_http_exception(error) from error
+    result = coordinated.record.result
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Analysis is not ready.")
+    metadata = result.video_metadata
     return UploadResponse(
         status="success",
         message="Video uploaded successfully.",
         original_filename=stored.original_filename,
-        filename=stored.filename,
-        size_bytes=stored.size_bytes,
+        filename=result.source_path.name,
+        size_bytes=metadata.file_size_bytes,
         content_type=stored.content_type,
         metadata=VideoMetadataResponse(
             duration_seconds=metadata.duration_seconds,
@@ -102,11 +77,3 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
             file_size_bytes=metadata.file_size_bytes,
         ),
     )
-
-
-def _discard_upload(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-        logger.info("Removed rejected upload %s", path.name)
-    except OSError:
-        logger.exception("Failed to remove rejected upload %s", path.name)

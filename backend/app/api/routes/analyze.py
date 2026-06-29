@@ -1,8 +1,10 @@
-import logging
-from pathlib import Path
+"""Backward-compatible metadata/thumbnail projection from AnalysisResult."""
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from backend.app.analysis import AnalysisExecutionError, ArtifactKind
+from backend.app.api.analysis_errors import pipeline_http_exception
+from backend.app.api.dependencies import get_analysis_coordinator
 from backend.app.core.config import get_settings
 from backend.app.schemas.analysis import AnalysisResponse
 from backend.app.services.storage import (
@@ -17,16 +19,9 @@ from backend.app.services.video_analyzer import (
     ThumbnailGenerationError,
     VideoAnalyzer,
 )
-from backend.app.services.video_service import (
-    InvalidVideoError,
-    VideoProbeTimeoutError,
-    VideoProcessingError,
-    VideoService,
-    VideoToolUnavailableError,
-)
+from backend.app.services.video_service import VideoService
 
 router = APIRouter(tags=["analysis"])
-logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -34,10 +29,12 @@ logger = logging.getLogger(__name__)
     response_model=AnalysisResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Analyze a video and generate its thumbnail",
+    deprecated=True,
 )
 async def analyze_video(file: UploadFile = File(...)) -> AnalysisResponse:
-    settings = get_settings()
+    """Compatibility adapter; canonical clients retrieve analysis by ID."""
 
+    settings = get_settings()
     try:
         stored = await store_upload(
             upload=file,
@@ -59,51 +56,63 @@ async def analyze_video(file: UploadFile = File(...)) -> AnalysisResponse:
     finally:
         await file.close()
 
-    analyzer = VideoAnalyzer(
-        video_service=VideoService(
-            ffprobe_binary=settings.ffprobe_binary,
-            timeout_seconds=settings.ffprobe_timeout_seconds,
-        ),
-        thumbnail_directory=settings.thumbnail_dir,
-        ffmpeg_binary=settings.ffmpeg_binary,
-        timeout_seconds=settings.ffmpeg_timeout_seconds,
-    )
-
+    coordinator = get_analysis_coordinator()
     try:
-        analysis = await analyzer.analyze(stored.path)
-    except InvalidVideoError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except (VideoProbeTimeoutError, AnalysisTimeoutError) as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=str(error),
-        ) from error
-    except (VideoToolUnavailableError, FFmpegUnavailableError) as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except ThumbnailGenerationError as error:
-        _discard_upload(stored.path)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
-    except VideoProcessingError as error:
-        _discard_upload(stored.path)
-        logger.exception("Video analysis failed for %s", stored.filename)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Video analysis failed.",
-        ) from error
+        coordinated = await coordinator.create_or_reuse(
+            source_path=stored.path,
+            source_filename=stored.original_filename,
+        )
+    except AnalysisExecutionError as error:
+        raise pipeline_http_exception(error) from error
+    result = coordinated.record.result
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Analysis is not ready.")
 
-    metadata = analysis.metadata
+    metadata = result.video_metadata
+    preview_reference = next(
+        (
+            reference
+            for reference in coordinated.record.artifacts.preview_assets
+            if coordinator.resolve_artifact(reference).is_file()
+        ),
+        None,
+    )
+    if preview_reference is None:
+        analyzer = VideoAnalyzer(
+            video_service=VideoService(
+                ffprobe_binary=settings.ffprobe_binary,
+                timeout_seconds=settings.ffprobe_timeout_seconds,
+            ),
+            thumbnail_directory=settings.thumbnail_dir,
+            ffmpeg_binary=settings.ffmpeg_binary,
+            timeout_seconds=settings.ffmpeg_timeout_seconds,
+        )
+        try:
+            thumbnail = await analyzer.generate_thumbnail(
+                result.source_path,
+                metadata.duration_seconds / 2,
+            )
+        except AnalysisTimeoutError as error:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=str(error),
+            ) from error
+        except FFmpegUnavailableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(error),
+            ) from error
+        except ThumbnailGenerationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(error),
+            ) from error
+        preview_reference = coordinator.artifact_reference(ArtifactKind.PREVIEW, thumbnail)
+        await coordinator.add_artifacts(
+            coordinated.record.analysis_id,
+            (preview_reference,),
+        )
+    thumbnail = coordinator.resolve_artifact(preview_reference)
     return AnalysisResponse(
         success=True,
         filename=stored.original_filename,
@@ -115,14 +124,6 @@ async def analyze_video(file: UploadFile = File(...)) -> AnalysisResponse:
         audio_codec=metadata.audio_codec,
         bitrate=metadata.bitrate,
         rotation=metadata.rotation,
-        thumbnail=f"/thumbnails/{analysis.thumbnail_path.name}",
+        thumbnail=f"/thumbnails/{thumbnail.relative_to(settings.thumbnail_dir).as_posix()}",
         filesize=metadata.file_size_bytes,
     )
-
-
-def _discard_upload(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-        logger.info("Removed failed analysis upload %s", path.name)
-    except OSError:
-        logger.exception("Failed to remove analysis upload %s", path.name)

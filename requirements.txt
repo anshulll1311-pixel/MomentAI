@@ -4,3 +4,4 @@ pydantic-settings==2.14.2
 python-multipart==0.0.32
 aiofiles==24.1.0
 faster-whisper==1.2.1
+google-genai==2.10.0
