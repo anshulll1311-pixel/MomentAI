@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 
+import { ExportPanel } from "@/components/export-panel";
 import { analyzeVideo, backendAssetUrl, uploadVideo } from "@/lib/api";
 import type { AnalysisResponse } from "@/lib/api";
 
@@ -168,28 +169,31 @@ export function UploadPanel() {
       </div>
 
       {analysis && (
-        <div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025] text-left">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={backendAssetUrl(analysis.thumbnail)}
-            alt={`Middle-frame thumbnail for ${analysis.filename}`}
-            className="aspect-video w-full bg-black object-cover"
-          />
-          <dl className="grid grid-cols-2 gap-x-5 gap-y-4 p-5 text-sm sm:grid-cols-3">
-            <AnalysisItem label="Filename" value={analysis.filename} />
-            <AnalysisItem label="Duration" value={`${analysis.duration.toFixed(2)} s`} />
-            <AnalysisItem label="Resolution" value={`${analysis.width} × ${analysis.height}`} />
-            <AnalysisItem label="FPS" value={analysis.fps.toFixed(2)} />
-            <AnalysisItem
-              label="Codecs"
-              value={`${analysis.video_codec.toUpperCase()} / ${analysis.audio_codec?.toUpperCase() ?? "No audio"}`}
+        <>
+          <div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025] text-left">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={backendAssetUrl(analysis.thumbnail)}
+              alt={`Middle-frame thumbnail for ${analysis.filename}`}
+              className="aspect-video w-full bg-black object-cover"
             />
-            <AnalysisItem label="Bitrate" value={`${(analysis.bitrate / 1_000_000).toFixed(2)} Mbps`} />
-            {analysis.rotation !== null && (
-              <AnalysisItem label="Rotation" value={`${analysis.rotation}°`} />
-            )}
-          </dl>
-        </div>
+            <dl className="grid grid-cols-2 gap-x-5 gap-y-4 p-5 text-sm sm:grid-cols-3">
+              <AnalysisItem label="Filename" value={analysis.filename} />
+              <AnalysisItem label="Duration" value={`${analysis.duration.toFixed(2)} s`} />
+              <AnalysisItem label="Resolution" value={`${analysis.width} × ${analysis.height}`} />
+              <AnalysisItem label="FPS" value={analysis.fps.toFixed(2)} />
+              <AnalysisItem
+                label="Codecs"
+                value={`${analysis.video_codec.toUpperCase()} / ${analysis.audio_codec?.toUpperCase() ?? "No audio"}`}
+              />
+              <AnalysisItem label="Bitrate" value={`${(analysis.bitrate / 1_000_000).toFixed(2)} Mbps`} />
+              {analysis.rotation !== null && (
+                <AnalysisItem label="Rotation" value={`${analysis.rotation}°`} />
+              )}
+            </dl>
+          </div>
+          {file && <ExportPanel file={file} />}
+        </>
       )}
     </div>
   );
