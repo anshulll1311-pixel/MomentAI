@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from backend.app.intelligence import create_default_engine
-from backend.app.services.moment_pipeline_service import MomentPipelineService
+from backend.app.services.moment_pipeline_service import AnalysisResult, MomentPipelineService
 from backend.app.services.scene_service import Scene, SceneDetectionResult
 from backend.app.services.transcript_service import (
     MissingAudioError,
@@ -86,6 +86,9 @@ class MomentPipelineTests(unittest.IsolatedAsyncioTestCase):
             result = await pipeline.analyze(video_path)
 
         self.assertEqual(calls, ["video", "scenes", "transcript"])
+        self.assertIsInstance(result, AnalysisResult)
+        self.assertEqual(result.source_path, video_path.resolve())
+        self.assertEqual(len(result.source_fingerprint), 64)
         self.assertEqual(result.transcript_result.language, "en")
         self.assertEqual(len(result.scene_result.scenes), 2)
         self.assertEqual(len(result.engine_result.moments), 2)

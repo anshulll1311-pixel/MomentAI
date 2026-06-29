@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging
+from backend.app.core.version import MOMENTAI_VERSION
 
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,8 @@ def create_application() -> FastAPI:
     configure_logging(settings.log_level)
     application = FastAPI(
         title=settings.app_name,
-        version="0.5.0",
-        description="MomentAI Milestone 5B deterministic moment intelligence API.",
+        version=MOMENTAI_VERSION,
+        description="MomentAI deterministic intelligence and export API.",
         lifespan=lifespan,
     )
 

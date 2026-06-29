@@ -26,7 +26,9 @@ class PipelineDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
-class MomentPipelineResult:
+class AnalysisResult:
+    source_path: Path
+    source_fingerprint: str
     video_metadata: VideoMetadata
     scene_result: SceneDetectionResult
     transcript_result: TranscriptResult | None
@@ -55,7 +57,7 @@ class MomentPipelineService:
         self,
         video_path: Path,
         profile_id: str = "default",
-    ) -> MomentPipelineResult:
+    ) -> AnalysisResult:
         logger.info("Starting Moment Intelligence pipeline for %s", video_path.name)
         metadata = await self._video_service.extract_metadata(video_path)
         scene_result = await self._scene_service.detect_scenes(video_path)
@@ -97,13 +99,19 @@ class MomentPipelineService:
             len(engine_result.moments),
             video_path.name,
         )
-        return MomentPipelineResult(
+        return AnalysisResult(
+            source_path=video_path.resolve(),
+            source_fingerprint=source_fingerprint,
             video_metadata=metadata,
             scene_result=scene_result,
             transcript_result=transcript_result,
             engine_result=engine_result,
             diagnostics=tuple(diagnostics),
         )
+
+
+# Backward-compatible name for callers compiled against Milestone 5B.
+MomentPipelineResult = AnalysisResult
 
 
 def _sha256_file(path: Path) -> str:

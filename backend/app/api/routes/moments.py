@@ -14,7 +14,7 @@ from backend.app.schemas.moments import (
     RankedMomentResponse,
     SignalContributionResponse,
 )
-from backend.app.services.moment_pipeline_service import MomentPipelineResult, MomentPipelineService
+from backend.app.services.moment_pipeline_service import AnalysisResult, MomentPipelineService
 from backend.app.services.scene_service import (
     SceneDetectionError,
     SceneService,
@@ -165,7 +165,7 @@ async def rank_video_moments(
 
 def _build_response(
     stored: StoredUpload,
-    result: MomentPipelineResult,
+    result: AnalysisResult,
     thumbnail_directory: Path,
 ) -> MomentsResponse:
     thumbnails_by_scene = {

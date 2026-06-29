@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     whisper_beam_size: int = Field(default=5, gt=0, le=20)
     audio_extraction_timeout_seconds: float = Field(default=60.0, gt=0, le=1800)
     transcription_timeout_seconds: float = Field(default=600.0, gt=0, le=7200)
+    export_dir: Path = Path("clips/exports")
+    export_temp_dir: Path = Path("temp/exports")
+    export_ffmpeg_timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
+    export_ffprobe_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -60,6 +64,8 @@ class Settings(BaseSettings):
             PROJECT_ROOT / "temp",
             self.transcript_temp_dir,
             self.whisper_model_dir,
+            self.export_dir,
+            self.export_temp_dir,
         )
 
     def model_post_init(self, __context: object) -> None:
@@ -71,6 +77,10 @@ class Settings(BaseSettings):
             self.transcript_temp_dir = PROJECT_ROOT / self.transcript_temp_dir
         if not self.whisper_model_dir.is_absolute():
             self.whisper_model_dir = PROJECT_ROOT / self.whisper_model_dir
+        if not self.export_dir.is_absolute():
+            self.export_dir = PROJECT_ROOT / self.export_dir
+        if not self.export_temp_dir.is_absolute():
+            self.export_temp_dir = PROJECT_ROOT / self.export_temp_dir
 
 
 @lru_cache
